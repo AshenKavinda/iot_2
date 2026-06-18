@@ -1,16 +1,16 @@
 import 'dart:async';
 
-import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/foundation.dart';
 
 import '../models/status_model.dart';
+import '../services/firebase_rest_service.dart';
 
 class StatusProvider extends ChangeNotifier {
   StatusModel _status = StatusModel.defaultValue;
   bool _hasError = false;
   bool _isLoading = true;
   DateTime? _lastUpdated;
-  StreamSubscription<DatabaseEvent>? _subscription;
+  Timer? _timer;
 
   StatusModel get status => _status;
   bool get hasError => _hasError;
@@ -18,37 +18,38 @@ class StatusProvider extends ChangeNotifier {
   DateTime? get lastUpdated => _lastUpdated;
 
   StatusProvider() {
-    _listen();
+    _poll();
   }
 
-  void _listen() {
-    _subscription =
-        FirebaseDatabase.instance.ref('/status').onValue.listen(
-      (event) {
-        _isLoading = false;
-        _hasError = false;
-        if (event.snapshot.exists && event.snapshot.value != null) {
-          final map = event.snapshot.value as Map<dynamic, dynamic>;
-          _status = StatusModel.fromMap(map);
-          _lastUpdated = DateTime.now();
-        }
-        notifyListeners();
-      },
-      onError: (_) {
-        _isLoading = false;
-        _hasError = true;
-        notifyListeners();
-      },
-    );
+  void _poll() {
+    _fetch();
+    _timer = Timer.periodic(const Duration(seconds: 3), (_) => _fetch());
+  }
+
+  Future<void> _fetch() async {
+    try {
+      final data = await FirebaseRestService.get('status');
+      _isLoading = false;
+      _hasError = false;
+      if (data is Map) {
+        _status = StatusModel.fromMap(data);
+        _lastUpdated = DateTime.now();
+      }
+      notifyListeners();
+    } catch (_) {
+      _isLoading = false;
+      _hasError = true;
+      notifyListeners();
+    }
   }
 
   Future<void> setManualOverride(bool value) async {
-    await FirebaseDatabase.instance.ref('/pump/manualOverride').set(value);
+    await FirebaseRestService.put('pump/manualOverride', value);
   }
 
   @override
   void dispose() {
-    _subscription?.cancel();
+    _timer?.cancel();
     super.dispose();
   }
 }
